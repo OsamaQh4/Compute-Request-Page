@@ -18,9 +18,9 @@ HARBOR_USER="${HARBOR_USER:?ERROR: set HARBOR_USER before running}"
 HARBOR_PASSWORD="${HARBOR_PASSWORD:?ERROR: set HARBOR_PASSWORD before running}"
 
 IMAGES=(
-  "python:3.11-slim"
-  "node:20-slim"
-  "nginx:1.27-alpine"
+  "oraclelinux:9"       # backend base (Python 3.11 installed via dnf)
+  "node:20-slim"        # frontend build stage
+  "nginx:1.27-alpine"   # frontend serve stage
 )
 
 # ── Detect CLI ────────────────────────────────────────────────────────────────
@@ -98,4 +98,4 @@ echo ""
 echo "All base images mirrored to Harbor."
 echo ""
 echo "Verify:"
-echo "  curl -u ${HARBOR_USER}:'***' http://${HARBOR_URL}/v2/${HARBOR_PROJECT}/python/tags/list"
+echo "  curl -u ${HARBOR_USER}:'***' http://${HARBOR_URL}/v2/${HARBOR_PROJECT}/oraclelinux/tags/list"
