@@ -1,5 +1,5 @@
 # ── Args — set these at build time or in your CI pipeline ─────────────────────
-ARG HARBOR_URL=harbor.your-domain.com
+ARG HARBOR_URL=k8sreglvp01.gosi.ins:8080
 ARG HARBOR_PROJECT=dockerhub
 
 # ── Build stage ───────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@
 # Harbor instance so the air-gapped build machines can use them.
 #
 # Usage:
-#   export HARBOR_URL=harbor.your-domain.com
+#   export HARBOR_URL=k8sreglvp01.gosi.ins:8080
 #   export HARBOR_PROJECT=dockerhub      # the Harbor project to push to
 #   export HARBOR_USER=admin
 #   export HARBOR_PASSWORD=yourpassword

@@ -7,7 +7,7 @@
 # (which only needs to reach Harbor — no internet required).
 #
 # Usage:
-#   export HARBOR_URL=harbor.your-domain.com
+#   export HARBOR_URL=k8sreglvp01.gosi.ins:8080
 #   export HARBOR_PROJECT=vm-portal      # project for your app images
 #   export HARBOR_BASE_PROJECT=dockerhub # project where base images were mirrored
 #   export HARBOR_USER=admin

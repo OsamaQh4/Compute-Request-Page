@@ -19,7 +19,7 @@ spec:
         - name: harbor-registry-secret
       containers:
         - name: backend
-          image: harbor.your-domain.com/vm-portal/backend:latest
+          image: k8sreglvp01.gosi.ins:8080/vm-portal/backend:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
