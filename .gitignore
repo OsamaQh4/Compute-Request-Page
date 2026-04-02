@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.env
+.env.*
+
+# Database
+*.db
+*.sqlite3
+
+# Node
+node_modules/
+dist/
+.DS_Store
+
+# Secrets — never commit these
+k8s/harbor-registry-secret.yaml
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code local config
+.claude/

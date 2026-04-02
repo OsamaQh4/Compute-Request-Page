@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vm-portal-backend
+  namespace: vm-portal
+  labels:
+    app: vm-portal-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vm-portal-backend
+  template:
+    metadata:
+      labels:
+        app: vm-portal-backend
+    spec:
+      imagePullSecrets:
+        - name: harbor-registry-secret
+      containers:
+        - name: backend
+          image: harbor.your-domain.com/vm-portal/backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vm-portal-secret
+                  key: SECRET_KEY
+            - name: DATABASE_URL
+              value: "sqlite:////data/vmrequest.db"
+          volumeMounts:
+            - name: db-storage
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: db-storage
+          persistentVolumeClaim:
+            claimName: vm-portal-db
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vm-portal-backend
+  namespace: vm-portal
+spec:
+  selector:
+    app: vm-portal-backend
+  ports:
+    - port: 8000
+      targetPort: 8000

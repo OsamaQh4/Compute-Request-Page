@@ -1,0 +1,39 @@
+# Traefik IngressRoute (CRD)
+# Requires Traefik v2+ with CRDs installed.
+# Adjust the Host rule to match your actual DNS name.
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: vm-portal
+  namespace: vm-portal
+spec:
+  entryPoints:
+    - web          # port 80  — change to websecure for TLS
+    # - websecure  # port 443 — uncomment for HTTPS
+  routes:
+    # All traffic goes to the frontend (nginx proxies /api/ to backend internally)
+    - match: Host(`vm-portal.your-domain.com`)
+      kind: Rule
+      services:
+        - name: vm-portal-frontend
+          port: 80
+---
+# Uncomment the block below if you want Traefik to terminate TLS
+# and have a cert-manager Certificate or a TLS secret named vm-portal-tls.
+#
+# apiVersion: traefik.containo.us/v1alpha1
+# kind: IngressRoute
+# metadata:
+#   name: vm-portal-tls
+#   namespace: vm-portal
+# spec:
+#   entryPoints:
+#     - websecure
+#   routes:
+#     - match: Host(`vm-portal.your-domain.com`)
+#       kind: Rule
+#       services:
+#         - name: vm-portal-frontend
+#           port: 80
+#   tls:
+#     secretName: vm-portal-tls
