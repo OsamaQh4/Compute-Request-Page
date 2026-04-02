@@ -8,7 +8,7 @@
 #
 # Usage:
 #   export HARBOR_URL=k8sreglvp01.gosi.ins:8080
-#   export HARBOR_PROJECT=dockerhub      # the Harbor project to push to
+#   export HARBOR_PROJECT=vm-portal      # the Harbor project to push to
 #   export HARBOR_USER=admin
 #   export HARBOR_PASSWORD=yourpassword
 #   bash scripts/mirror-base-images.sh
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 HARBOR_URL="${HARBOR_URL:?Set HARBOR_URL}"
-HARBOR_PROJECT="${HARBOR_PROJECT:-dockerhub}"
+HARBOR_PROJECT="${HARBOR_PROJECT:-vm-portal}"
 HARBOR_USER="${HARBOR_USER:?Set HARBOR_USER}"
 HARBOR_PASSWORD="${HARBOR_PASSWORD:?Set HARBOR_PASSWORD}"
 

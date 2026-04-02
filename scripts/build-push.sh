@@ -9,7 +9,7 @@
 # Usage:
 #   export HARBOR_URL=k8sreglvp01.gosi.ins:8080
 #   export HARBOR_PROJECT=vm-portal      # project for your app images
-#   export HARBOR_BASE_PROJECT=dockerhub # project where base images were mirrored
+#   export HARBOR_BASE_PROJECT=vm-portal # project where base images were mirrored
 #   export HARBOR_USER=admin
 #   export HARBOR_PASSWORD=yourpassword
 #   export IMAGE_TAG=1.0.0               # optional, defaults to "latest"
@@ -19,7 +19,7 @@ set -euo pipefail
 
 HARBOR_URL="${HARBOR_URL:?Set HARBOR_URL}"
 HARBOR_PROJECT="${HARBOR_PROJECT:-vm-portal}"
-HARBOR_BASE_PROJECT="${HARBOR_BASE_PROJECT:-dockerhub}"
+HARBOR_BASE_PROJECT="${HARBOR_BASE_PROJECT:-vm-portal}"
 HARBOR_USER="${HARBOR_USER:?Set HARBOR_USER}"
 HARBOR_PASSWORD="${HARBOR_PASSWORD:?Set HARBOR_PASSWORD}"
 TAG="${IMAGE_TAG:-latest}"

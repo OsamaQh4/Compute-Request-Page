@@ -12,7 +12,7 @@ spec:
     # - websecure  # port 443 — uncomment for HTTPS
   routes:
     # All traffic goes to the frontend (nginx proxies /api/ to backend internally)
-    - match: Host(`vm-portal.your-domain.com`)
+    - match: Host(`compute-portal.k8s-ai-cluster.gosi.ins`)
       kind: Rule
       services:
         - name: vm-portal-frontend
@@ -30,7 +30,7 @@ spec:
 #   entryPoints:
 #     - websecure
 #   routes:
-#     - match: Host(`vm-portal.your-domain.com`)
+#     - match: Host(`compute-portal.k8s-ai-cluster.gosi.ins`)
 #       kind: Rule
 #       services:
 #         - name: vm-portal-frontend
