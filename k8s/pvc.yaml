@@ -6,7 +6,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
+  storageClassName: nfs-storage    # Delete policy — swap to nfs-datasets for Retain
   resources:
     requests:
       storage: 2Gi
-  # storageClassName: standard   # uncomment and set to match your cluster's storage class
