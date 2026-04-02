@@ -3,7 +3,7 @@
 # mirror-base-images.sh
 #
 # Run this on the Harbor server (K8SREGLVP01) which has Podman and internet
-# access. It pulls base images from Docker Hub and pushes them into Harbor.
+# access. Pulls base images from Docker Hub and pushes them into Harbor.
 #
 # Usage:
 #   export HARBOR_USER=admin
@@ -23,52 +23,79 @@ IMAGES=(
   "nginx:1.27-alpine"
 )
 
-# ── Detect available container CLI (podman preferred, docker fallback) ─────────
+# ── Detect CLI ────────────────────────────────────────────────────────────────
 if command -v podman &>/dev/null; then
   CLI="podman"
-  # Podman uses --tls-verify=false for HTTP registries
-  PULL_OPTS="--tls-verify=false"
-  PUSH_OPTS="--tls-verify=false"
-  LOGIN_OPTS="--tls-verify=false"
 elif command -v docker &>/dev/null; then
   CLI="docker"
-  PULL_OPTS=""
-  PUSH_OPTS=""
-  LOGIN_OPTS=""
 else
-  echo "ERROR: Neither podman nor docker found. Install one and retry."
+  echo "ERROR: Neither podman nor docker found."
   exit 1
 fi
-
 echo "Using: ${CLI}"
-echo "Target registry: http://${HARBOR_URL}/${HARBOR_PROJECT}"
-echo ""
+
+# ── Configure insecure registry (HTTP) ───────────────────────────────────────
+# --tls-verify=false only skips cert checks but still uses HTTPS.
+# The registry must be declared insecure to force plain HTTP.
+if [ "${CLI}" = "podman" ]; then
+  REGISTRIES_CONF="/etc/containers/registries.conf"
+  if ! grep -q "${HARBOR_URL}" "${REGISTRIES_CONF}" 2>/dev/null; then
+    echo "Adding ${HARBOR_URL} as insecure registry in ${REGISTRIES_CONF}..."
+    cat >> "${REGISTRIES_CONF}" <<EOF
+
+[[registry]]
+location = "${HARBOR_URL}"
+insecure = true
+EOF
+    echo "  Done."
+  else
+    echo "  ${HARBOR_URL} already in ${REGISTRIES_CONF}."
+  fi
+else
+  # Docker
+  DAEMON_JSON="/etc/docker/daemon.json"
+  if ! grep -q "${HARBOR_URL}" "${DAEMON_JSON}" 2>/dev/null; then
+    echo "Adding ${HARBOR_URL} to Docker insecure-registries..."
+    mkdir -p /etc/docker
+    cat > "${DAEMON_JSON}" <<EOF
+{
+  "insecure-registries": ["${HARBOR_URL}"]
+}
+EOF
+    systemctl restart docker && sleep 3
+    echo "  Done."
+  else
+    echo "  ${HARBOR_URL} already in ${DAEMON_JSON}."
+  fi
+fi
 
 # ── Login ─────────────────────────────────────────────────────────────────────
-echo "Logging in to Harbor..."
-echo "${HARBOR_PASSWORD}" | ${CLI} login ${LOGIN_OPTS} \
-  "${HARBOR_URL}" -u "${HARBOR_USER}" --password-stdin
 echo ""
+echo "Logging in to ${HARBOR_URL}..."
+echo "${HARBOR_PASSWORD}" | ${CLI} login \
+  --tls-verify=false \
+  "${HARBOR_URL}" -u "${HARBOR_USER}" --password-stdin
 
 # ── Mirror each image ─────────────────────────────────────────────────────────
 for IMAGE in "${IMAGES[@]}"; do
   SRC="docker.io/${IMAGE}"
   DEST="${HARBOR_URL}/${HARBOR_PROJECT}/${IMAGE}"
 
+  echo ""
   echo "──────────────────────────────────────────────"
   echo "  Pull : ${SRC}"
   echo "  Push : ${DEST}"
   echo "──────────────────────────────────────────────"
 
-  ${CLI} pull ${PULL_OPTS} "${SRC}"
+  ${CLI} pull --tls-verify=false "${SRC}"
   ${CLI} tag "${SRC}" "${DEST}"
-  ${CLI} push ${PUSH_OPTS} "${DEST}"
+  ${CLI} push --tls-verify=false "${DEST}"
 
   echo "  ✓ Done"
-  echo ""
 done
 
+echo ""
 echo "All base images mirrored to Harbor."
 echo ""
-echo "Verify with:"
-echo "  curl -u ${HARBOR_USER}:*** http://${HARBOR_URL}/v2/${HARBOR_PROJECT}/python/tags/list"
+echo "Verify:"
+echo "  curl -u ${HARBOR_USER}:'***' http://${HARBOR_URL}/v2/${HARBOR_PROJECT}/python/tags/list"
