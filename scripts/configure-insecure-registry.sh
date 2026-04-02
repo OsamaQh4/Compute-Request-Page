@@ -65,13 +65,46 @@ systemctl is-active containerd && echo "      containerd is running." || echo " 
 # ── Verify ────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Verification ==="
-echo "Checking registry reachability..."
-if curl -sf --max-time 5 "http://${REGISTRY}/v2/" -o /dev/null; then
-  echo "  ✓ Registry is reachable at http://${REGISTRY}"
+
+# 1. DNS resolution
+echo -n "  DNS resolution........... "
+if getent hosts "${REGISTRY%%:*}" &>/dev/null; then
+  echo "✓  $(getent hosts "${REGISTRY%%:*}" | awk '{print $1}')"
 else
-  echo "  ✗ Registry not reachable — check network/DNS and that Harbor is running"
+  echo "✗  Cannot resolve ${REGISTRY%%:*} — check /etc/hosts or DNS"
 fi
 
+# 2. TCP port reachable
+echo -n "  TCP port reachable....... "
+if timeout 5 bash -c "echo >/dev/tcp/${REGISTRY%%:*}/${REGISTRY##*:}" 2>/dev/null; then
+  echo "✓  port ${REGISTRY##*:} open"
+else
+  echo "✗  Cannot reach port ${REGISTRY##*:} — check firewall / Harbor nginx"
+fi
+
+# 3. HTTP response — 401 is expected (Harbor requires auth) and means Harbor IS running
+echo -n "  Harbor HTTP response..... "
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://${REGISTRY}/v2/" 2>/dev/null)
+case "$HTTP_CODE" in
+  200|401)
+    echo "✓  HTTP ${HTTP_CODE} — Harbor is up (401 = auth required, that is normal)"
+    ;;
+  000)
+    echo "✗  No response (connection refused or timeout)"
+    ;;
+  *)
+    echo "✗  Unexpected HTTP ${HTTP_CODE}"
+    ;;
+esac
+
 echo ""
-echo "Run on ALL nodes before deploying. Then test a pull with:"
+echo "=== containerd config check ==="
+echo -n "  hosts.toml present....... "
+[ -f "/etc/containerd/certs.d/${REGISTRY}/hosts.toml" ] && echo "✓" || echo "✗  missing"
+
+echo -n "  config_path in config.... "
+grep -q 'config_path' "${CONTAINERD_CONFIG}" && echo "✓" || echo "✗  missing — re-run this script"
+
+echo ""
+echo "If all checks pass, test an actual image pull with:"
 echo "  crictl pull ${REGISTRY}/vm-portal/backend:latest"

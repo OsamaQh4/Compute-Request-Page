@@ -17,7 +17,7 @@
 # =============================================================================
 set -euo pipefail
 
-HARBOR_URL="${HARBOR_URL:?Set HARBOR_URL}"
+HARBOR_URL="${HARBOR_URL:-k8sreglvp01.gosi.ins:8080}"
 HARBOR_PROJECT="${HARBOR_PROJECT:-vm-portal}"
 HARBOR_BASE_PROJECT="${HARBOR_BASE_PROJECT:-vm-portal}"
 HARBOR_USER="${HARBOR_USER:?Set HARBOR_USER}"
@@ -26,6 +26,19 @@ TAG="${IMAGE_TAG:-latest}"
 
 BACKEND_IMAGE="${HARBOR_URL}/${HARBOR_PROJECT}/backend:${TAG}"
 FRONTEND_IMAGE="${HARBOR_URL}/${HARBOR_PROJECT}/frontend:${TAG}"
+
+# Ensure Docker allows this plain-HTTP registry on the build machine
+if ! grep -q "${HARBOR_URL}" /etc/docker/daemon.json 2>/dev/null; then
+  echo "Adding ${HARBOR_URL} to Docker insecure-registries on this machine..."
+  mkdir -p /etc/docker
+  cat > /etc/docker/daemon.json <<EOF
+{
+  "insecure-registries": ["${HARBOR_URL}"]
+}
+EOF
+  systemctl restart docker
+  sleep 3
+fi
 
 echo "Logging in to Harbor at ${HARBOR_URL}..."
 echo "${HARBOR_PASSWORD}" | docker login "${HARBOR_URL}" -u "${HARBOR_USER}" --password-stdin
