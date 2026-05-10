@@ -13,6 +13,10 @@
 # =============================================================================
 set -euo pipefail
 
+# Resolve project root regardless of where the script is called from
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
+
 HARBOR_URL="${HARBOR_URL:-k8sreglvp01.gosi.ins:8080}"
 HARBOR_PROJECT="${HARBOR_PROJECT:-vm-portal}"
 HARBOR_BASE_PROJECT="${HARBOR_BASE_PROJECT:-vm-portal}"
@@ -75,7 +79,7 @@ ${CLI} build \
   --build-arg HARBOR_URL="${HARBOR_URL}" \
   --build-arg HARBOR_PROJECT="${HARBOR_BASE_PROJECT}" \
   -t "${BACKEND_IMAGE}" \
-  ./backend
+  "${PROJECT_ROOT}/backend"
 
 echo "Pushing ${BACKEND_IMAGE}..."
 ${CLI} push --tls-verify=false "${BACKEND_IMAGE}"
@@ -88,7 +92,7 @@ ${CLI} build \
   --build-arg HARBOR_URL="${HARBOR_URL}" \
   --build-arg HARBOR_PROJECT="${HARBOR_BASE_PROJECT}" \
   -t "${FRONTEND_IMAGE}" \
-  ./frontend
+  "${PROJECT_ROOT}/frontend"
 
 echo "Pushing ${FRONTEND_IMAGE}..."
 ${CLI} push --tls-verify=false "${FRONTEND_IMAGE}"
