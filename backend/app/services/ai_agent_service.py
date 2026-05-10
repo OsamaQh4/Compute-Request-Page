@@ -1,5 +1,6 @@
 import httpx
 import json
+import re
 import ssl
 import logging
 from typing import Optional
@@ -70,9 +71,16 @@ class AIAgentService:
         prompt = self._build_edit_prompt(request, current_vm)
         return self._call_agent(prompt)
 
+    @staticmethod
+    def _strip_thinking(text: str) -> str:
+        """Remove <think>/<thinking> blocks emitted by reasoning models."""
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        return text.strip()
+
     def _call_agent(self, user_message: str) -> str:
         system_prompt = self.config.system_prompt or (
-            "You are a VMware automation agent. Execute the requested VM operations and respond with the result status."
+            "You are a VMware automation agent. Summarize the VM operation result clearly and concisely."
         )
         payload = {
             "model": self.config.model,
@@ -86,7 +94,8 @@ class AIAgentService:
             resp = client.post(f"{self.base_url}/v1/chat/completions", json=payload)
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"]
+            return self._strip_thinking(content)
 
     def test_connection(self) -> dict:
         try:

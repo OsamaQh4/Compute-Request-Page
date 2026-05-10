@@ -1,16 +1,20 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
 
+logger = logging.getLogger(__name__)
+
 from ..database import get_db
-from ..models import Request, VirtualMachine, SMTPConfig, AIAgentConfig
+from ..models import Request, VirtualMachine, SMTPConfig, AIAgentConfig, VCenter
 from ..schemas import (
     ProvisionRequestCreate, EditRequestCreate, RequestOut, ApproveRequest, DenyRequest
 )
 from ..dependencies import get_current_user, require_admin
 from ..services.smtp_service import SMTPService
 from ..services.ai_agent_service import AIAgentService
+from ..services.vcenter_service import VCenterService
 
 router = APIRouter(prefix="/requests", tags=["requests"])
 
@@ -57,33 +61,69 @@ def _get_agent(db: Session) -> Optional[AIAgentService]:
     return AIAgentService(cfg) if cfg else None
 
 
+def _get_vcenter_for_request(request: Request, db: Session) -> Optional[VCenter]:
+    """Return the vCenter instance to use for executing the request."""
+    if request.request_type == "edit" and request.target_vm_id:
+        vm = db.query(VirtualMachine).filter(VirtualMachine.id == request.target_vm_id).first()
+        if vm:
+            return db.query(VCenter).filter(
+                VCenter.id == vm.vcenter_id, VCenter.is_active == True
+            ).first()
+    # For provision requests use the first active vCenter
+    return db.query(VCenter).filter(VCenter.is_active == True).first()
+
+
 async def _process_approved_request(request_id: int, db: Session):
-    """Run agent + send completion emails after approval."""
+    """Execute the vCenter operation then send completion emails."""
     request = db.query(Request).filter(Request.id == request_id).first()
     if not request:
         return
 
-    agent = _get_agent(db)
     smtp = _get_smtp(db)
+    parts: list[str] = []
 
     try:
-        if agent:
-            vm = None
-            if request.target_vm_id:
-                vm = db.query(VirtualMachine).filter(VirtualMachine.id == request.target_vm_id).first()
-
+        # ── 1. Execute the real vCenter operation ────────────────────────────
+        vcenter = _get_vcenter_for_request(request, db)
+        if vcenter:
+            svc = VCenterService(vcenter)
             if request.request_type == "provision":
-                response = agent.execute_provision(request)
+                vcenter_result = svc.provision_vm(request)
             else:
-                response = agent.execute_edit(request, vm)
-
-            request.agent_response = response
-            request.status = "completed"
+                vm = db.query(VirtualMachine).filter(
+                    VirtualMachine.id == request.target_vm_id
+                ).first()
+                vcenter_result = svc.edit_vm(
+                    vm.vm_id if vm else request.target_vm_name, request
+                )
+            parts.append(f"[vCenter] {vcenter_result}")
         else:
-            request.agent_response = "No AI agent configured – action logged only."
-            request.status = "completed"
+            parts.append("[vCenter] No active vCenter configured — action not executed.")
+
+        # ── 2. Call AI agent for a human-readable summary (optional) ─────────
+        agent = _get_agent(db)
+        if agent:
+            try:
+                vm = None
+                if request.target_vm_id:
+                    vm = db.query(VirtualMachine).filter(
+                        VirtualMachine.id == request.target_vm_id
+                    ).first()
+                if request.request_type == "provision":
+                    ai_summary = agent.execute_provision(request)
+                else:
+                    ai_summary = agent.execute_edit(request, vm)
+                if ai_summary:
+                    parts.append(f"[AI Agent] {ai_summary}")
+            except Exception as ai_err:
+                logger.warning("AI agent call failed: %s", ai_err)
+
+        request.agent_response = "\n\n".join(parts)
+        request.status = "completed"
+
     except Exception as e:
-        request.agent_response = f"Agent error: {e}"
+        logger.exception("Failed to process approved request %s", request_id)
+        request.agent_response = f"Execution error: {e}"
         request.status = "failed"
 
     db.commit()

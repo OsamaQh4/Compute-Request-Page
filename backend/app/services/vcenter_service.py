@@ -127,6 +127,141 @@ class VCenterService:
             pass
         return []
 
+    # ── Write operations ──────────────────────────────────────────────────────
+
+    def _resolve_cluster(self, client: httpx.Client, name: str) -> str:
+        resp = client.get(f"{self.base_url}/rest/vcenter/cluster")
+        resp.raise_for_status()
+        for c in resp.json().get("value", []):
+            if c.get("name", "").lower() == name.lower():
+                return c["cluster"]
+        raise ValueError(f"Cluster '{name}' not found in vCenter")
+
+    def _resolve_datastore(self, client: httpx.Client, name: str) -> str:
+        resp = client.get(f"{self.base_url}/rest/vcenter/datastore")
+        resp.raise_for_status()
+        for d in resp.json().get("value", []):
+            if d.get("name", "").lower() == name.lower():
+                return d["datastore"]
+        raise ValueError(f"Datastore '{name}' not found in vCenter")
+
+    def _resolve_folder(self, client: httpx.Client) -> str:
+        resp = client.get(
+            f"{self.base_url}/rest/vcenter/folder",
+            params={"filter.type": "VIRTUAL_MACHINE"},
+        )
+        resp.raise_for_status()
+        folders = resp.json().get("value", [])
+        if not folders:
+            raise ValueError("No VM folder found in vCenter")
+        return folders[0]["folder"]
+
+    def provision_vm(self, request) -> str:
+        with self._client() as client:
+            token = self._get_session(client)
+            client.headers["vmware-api-session-id"] = token
+            try:
+                cluster_id = self._resolve_cluster(client, request.cluster)
+                datastore_id = self._resolve_datastore(client, request.datastore)
+                folder_id = self._resolve_folder(client)
+
+                spec = {
+                    "spec": {
+                        "name": request.vm_name,
+                        "guest_OS": "OTHER_64",
+                        "placement": {
+                            "cluster": cluster_id,
+                            "datastore": datastore_id,
+                            "folder": folder_id,
+                        },
+                        "cpu": {
+                            "count": request.cpu_count,
+                            "cores_per_socket": 1,
+                        },
+                        "memory": {
+                            "size_MiB": request.memory_mb,
+                        },
+                        "disks": [
+                            {
+                                "type": "SCSI",
+                                "new_vmdk": {
+                                    "capacity": int(request.storage_gb * (1024 ** 3)),
+                                },
+                            }
+                        ],
+                    }
+                }
+
+                resp = client.post(f"{self.base_url}/rest/vcenter/vm", json=spec)
+                resp.raise_for_status()
+                vm_id = resp.json().get("value", "unknown")
+                return f"VM '{request.vm_name}' provisioned successfully (ID: {vm_id})."
+            finally:
+                try:
+                    client.delete(f"{self.base_url}/rest/com/vmware/cis/session")
+                except Exception:
+                    pass
+
+    def edit_vm(self, vm_id: str, request) -> str:
+        results = []
+        with self._client() as client:
+            token = self._get_session(client)
+            client.headers["vmware-api-session-id"] = token
+            try:
+                if request.requested_cpu:
+                    resp = client.patch(
+                        f"{self.base_url}/rest/vcenter/vm/{vm_id}/hardware/cpu",
+                        json={"spec": {"count": request.requested_cpu}},
+                    )
+                    resp.raise_for_status()
+                    results.append(f"CPU set to {request.requested_cpu} vCPU(s)")
+
+                if request.requested_memory_mb:
+                    resp = client.patch(
+                        f"{self.base_url}/rest/vcenter/vm/{vm_id}/hardware/memory",
+                        json={"spec": {"size_MiB": request.requested_memory_mb}},
+                    )
+                    resp.raise_for_status()
+                    results.append(f"Memory set to {request.requested_memory_mb} MB")
+
+                if request.requested_storage_gb:
+                    # Resize the first disk found on the VM
+                    disk_resp = client.get(f"{self.base_url}/rest/vcenter/vm/{vm_id}/hardware/disk")
+                    disk_resp.raise_for_status()
+                    disks = disk_resp.json().get("value", [])
+                    if disks:
+                        disk_id = disks[0]["disk"]
+                        resp = client.patch(
+                            f"{self.base_url}/rest/vcenter/vm/{vm_id}/hardware/disk/{disk_id}",
+                            json={"spec": {"capacity": int(request.requested_storage_gb * (1024 ** 3))}},
+                        )
+                        resp.raise_for_status()
+                        results.append(f"Storage set to {request.requested_storage_gb} GB")
+                    else:
+                        results.append("Storage resize skipped: no disks found on VM")
+
+                if request.snapshot_action == "add" and request.snapshot_name:
+                    resp = client.post(
+                        f"{self.base_url}/rest/vcenter/vm/{vm_id}/snapshot",
+                        json={"spec": {"name": request.snapshot_name, "memory": False, "quiesce": False}},
+                    )
+                    resp.raise_for_status()
+                    results.append(f"Snapshot '{request.snapshot_name}' created")
+
+                elif request.snapshot_action == "delete" and request.snapshot_id:
+                    resp = client.delete(
+                        f"{self.base_url}/rest/vcenter/vm/{vm_id}/snapshot/{request.snapshot_id}"
+                    )
+                    resp.raise_for_status()
+                    results.append(f"Snapshot '{request.snapshot_name}' deleted")
+
+                return "Changes applied: " + "; ".join(results) if results else "No changes were specified."
+            finally:
+                try:
+                    client.delete(f"{self.base_url}/rest/com/vmware/cis/session")
+                except Exception:
+                    pass
+
     def test_connection(self) -> Dict:
         try:
             with self._client() as client:
