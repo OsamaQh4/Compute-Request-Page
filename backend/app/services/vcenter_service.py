@@ -127,6 +127,77 @@ class VCenterService:
             pass
         return []
 
+    def apply_edit(
+        self,
+        vm_id: str,
+        cpu_count: Optional[int] = None,
+        memory_mb: Optional[int] = None,
+        snapshot_action: Optional[str] = None,
+        snapshot_name: Optional[str] = None,
+        snapshot_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Apply VM edits via vSphere REST API in a single authenticated session.
+        Returns {"success": bool, "applied": [...], "errors": [...]}.
+        """
+        applied: List[str] = []
+        errors: List[str] = []
+
+        with self._client() as client:
+            token = self._get_session(client)
+            client.headers["vmware-api-session-id"] = token
+            try:
+                if cpu_count is not None:
+                    resp = client.patch(
+                        f"{self.base_url}/rest/vcenter/vm/{vm_id}/hardware/cpu",
+                        json={"spec": {"count": cpu_count}},
+                    )
+                    if resp.is_success:
+                        applied.append(f"CPU updated to {cpu_count} vCPU(s)")
+                    else:
+                        errors.append(f"CPU update failed (HTTP {resp.status_code}): {resp.text}")
+
+                if memory_mb is not None:
+                    resp = client.patch(
+                        f"{self.base_url}/rest/vcenter/vm/{vm_id}/hardware/memory",
+                        json={"spec": {"size_MiB": memory_mb}},
+                    )
+                    if resp.is_success:
+                        applied.append(f"Memory updated to {memory_mb} MB")
+                    else:
+                        errors.append(f"Memory update failed (HTTP {resp.status_code}): {resp.text}")
+
+                if snapshot_action == "add" and snapshot_name:
+                    resp = client.post(
+                        f"{self.base_url}/rest/vcenter/vm/{vm_id}/snapshot",
+                        json={"spec": {"name": snapshot_name, "memory": False, "quiesce": False}},
+                    )
+                    if resp.is_success:
+                        applied.append(f"Snapshot '{snapshot_name}' created")
+                    else:
+                        errors.append(f"Snapshot creation failed (HTTP {resp.status_code}): {resp.text}")
+
+                elif snapshot_action == "delete" and snapshot_id:
+                    resp = client.delete(
+                        f"{self.base_url}/rest/vcenter/vm/{vm_id}/snapshot/{snapshot_id}",
+                    )
+                    if resp.is_success:
+                        applied.append(f"Snapshot '{snapshot_id}' deleted")
+                    else:
+                        errors.append(f"Snapshot deletion failed (HTTP {resp.status_code}): {resp.text}")
+
+            finally:
+                try:
+                    client.delete(f"{self.base_url}/rest/com/vmware/cis/session")
+                except Exception:
+                    pass
+
+        return {
+            "success": len(errors) == 0 and len(applied) > 0,
+            "applied": applied,
+            "errors": errors,
+        }
+
     def test_connection(self) -> Dict:
         try:
             with self._client() as client:

@@ -1,16 +1,20 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
 
+logger = logging.getLogger(__name__)
+
 from ..database import get_db
-from ..models import Request, VirtualMachine, SMTPConfig, AIAgentConfig
+from ..models import Request, VirtualMachine, VCenter, SMTPConfig, AIAgentConfig
 from ..schemas import (
     ProvisionRequestCreate, EditRequestCreate, RequestOut, ApproveRequest, DenyRequest
 )
 from ..dependencies import get_current_user, require_admin
 from ..services.smtp_service import SMTPService
 from ..services.ai_agent_service import AIAgentService
+from ..services.vcenter_service import VCenterService
 
 router = APIRouter(prefix="/requests", tags=["requests"])
 
@@ -57,33 +61,83 @@ def _get_agent(db: Session) -> Optional[AIAgentService]:
     return AIAgentService(cfg) if cfg else None
 
 
+def _format_edit_report(result: dict, request: Request) -> str:
+    """Build a human-readable report from a real vCenter apply_edit result."""
+    lines = [
+        f"VM: {request.target_vm_name}",
+        f"Requested by: {request.requester_name} ({request.requester_email})",
+        "",
+    ]
+    if result["applied"]:
+        lines.append("Changes applied:")
+        for item in result["applied"]:
+            lines.append(f"  - {item}")
+    if result["errors"]:
+        lines.append("Errors:")
+        for err in result["errors"]:
+            lines.append(f"  - {err}")
+    status = "SUCCESS" if result["success"] else "PARTIAL FAILURE" if result["applied"] else "FAILED"
+    lines.append(f"\nStatus: {status}")
+    return "\n".join(lines)
+
+
 async def _process_approved_request(request_id: int, db: Session):
-    """Run agent + send completion emails after approval."""
+    """Execute vCenter changes (edit) or call the AI agent (provision), then send emails."""
     request = db.query(Request).filter(Request.id == request_id).first()
     if not request:
         return
 
-    agent = _get_agent(db)
     smtp = _get_smtp(db)
 
     try:
-        if agent:
-            vm = None
-            if request.target_vm_id:
-                vm = db.query(VirtualMachine).filter(VirtualMachine.id == request.target_vm_id).first()
+        if request.request_type == "edit":
+            # ── Real vCenter execution ───────────────────────────────────────
+            vm = db.query(VirtualMachine).filter(
+                VirtualMachine.id == request.target_vm_id
+            ).first()
 
-            if request.request_type == "provision":
-                response = agent.execute_provision(request)
+            if not vm:
+                request.agent_response = "Error: target VM not found in database."
+                request.status = "failed"
             else:
-                response = agent.execute_edit(request, vm)
+                vcenter = db.query(VCenter).filter(VCenter.id == vm.vcenter_id).first()
+                if not vcenter:
+                    request.agent_response = "Error: vCenter not found for this VM."
+                    request.status = "failed"
+                else:
+                    svc = VCenterService(vcenter)
+                    result = svc.apply_edit(
+                        vm_id=vm.vm_id,
+                        cpu_count=request.requested_cpu,
+                        memory_mb=request.requested_memory_mb,
+                        snapshot_action=request.snapshot_action,
+                        snapshot_name=request.snapshot_name,
+                        snapshot_id=request.snapshot_id,
+                    )
+                    request.agent_response = _format_edit_report(result, request)
+                    request.status = "completed" if result["applied"] else "failed"
 
-            request.agent_response = response
-            request.status = "completed"
+                    # Sync the local VM record with whatever was successfully applied
+                    if result["success"] or result["applied"]:
+                        if request.requested_cpu and any("CPU" in s for s in result["applied"]):
+                            vm.cpu_count = request.requested_cpu
+                        if request.requested_memory_mb and any("Memory" in s for s in result["applied"]):
+                            vm.memory_mb = request.requested_memory_mb
+
         else:
-            request.agent_response = "No AI agent configured – action logged only."
-            request.status = "completed"
+            # ── Provision: delegate to the AI agent ──────────────────────────
+            agent = _get_agent(db)
+            if agent:
+                response = agent.execute_provision(request)
+                request.agent_response = response
+                request.status = "completed"
+            else:
+                request.agent_response = "No AI agent configured – provision logged only."
+                request.status = "completed"
+
     except Exception as e:
-        request.agent_response = f"Agent error: {e}"
+        logger.exception("Failed to process request %s", request_id)
+        request.agent_response = f"Execution error: {e}"
         request.status = "failed"
 
     db.commit()
