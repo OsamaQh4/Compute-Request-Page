@@ -6,6 +6,7 @@ import {
   ClipboardDocumentListIcon,
   ArrowRightOnRectangleIcon,
   ComputerDesktopIcon,
+  LockClosedIcon,
 } from '@heroicons/react/24/outline'
 
 export default function RequestPortal() {
@@ -64,22 +65,25 @@ export default function RequestPortal() {
 
       {/* Cards */}
       <div className="mx-auto max-w-3xl px-6 pb-16 grid grid-cols-1 sm:grid-cols-2 gap-6">
-        <button
-          onClick={() => navigate('/request/provision')}
-          className="group relative flex flex-col items-center text-center rounded-2xl bg-white border-2 border-transparent
-                     p-8 shadow-sm hover:border-brand-500 hover:shadow-md transition-all duration-200"
+        <div
+          className="relative flex flex-col items-center text-center rounded-2xl bg-gray-50 border-2 border-dashed border-gray-200
+                     p-8 shadow-none cursor-not-allowed opacity-70"
         >
-          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 group-hover:bg-brand-100 transition-colors">
-            <PlusCircleIcon className="h-9 w-9 text-brand-600" />
+          {/* Coming soon badge */}
+          <span className="absolute top-3 right-3 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+            <LockClosedIcon className="h-3 w-3" /> Coming Soon
+          </span>
+          <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100">
+            <PlusCircleIcon className="h-9 w-9 text-gray-400" />
           </div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">Provision New VM</h2>
-          <p className="text-sm text-gray-500 leading-relaxed">
+          <h2 className="text-lg font-semibold text-gray-400 mb-2">Provision New VM</h2>
+          <p className="text-sm text-gray-400 leading-relaxed">
             Request a new virtual machine with custom CPU, memory, storage, network, and OS configuration.
           </p>
-          <span className="mt-5 inline-flex items-center gap-1 text-sm font-medium text-brand-600 group-hover:gap-2 transition-all">
-            Get started →
+          <span className="mt-5 inline-flex items-center gap-1 text-sm font-medium text-gray-400">
+            <LockClosedIcon className="h-4 w-4" /> Not available yet
           </span>
-        </button>
+        </div>
 
         <button
           onClick={() => navigate('/request/edit')}
@@ -102,8 +106,9 @@ export default function RequestPortal() {
       {/* Info bar */}
       <div className="mx-auto max-w-3xl px-6 pb-16">
         <div className="rounded-xl bg-blue-50 border border-blue-200 px-5 py-4 text-sm text-blue-700">
-          <strong>Auto-approval policy:</strong> Edit requests with resource increases of ≤10% are automatically
-          approved. Larger changes and all provision requests require administrator approval.
+          <strong>Auto-approval policy:</strong> Edit requests are auto-approved when increases stay within
+          ≤ 4 vCPU, ≤ 6 GB RAM, or ≤ 100 GB new disk. Resource decreases and snapshot-only changes are always
+          auto-approved. Larger increases require administrator approval.
         </div>
       </div>
     </div>
