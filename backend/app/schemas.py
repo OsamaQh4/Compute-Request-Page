@@ -72,6 +72,7 @@ class VMOut(BaseModel):
     datastore: Optional[str] = None
     network: Optional[str] = None
     snapshots: str          # raw JSON string
+    disks: str = "[]"       # raw JSON string: [{key, label, capacity_gb}]
     last_updated: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
@@ -98,6 +99,7 @@ class EditRequestCreate(BaseModel):
     requested_cpu: Optional[int] = None
     requested_memory_mb: Optional[int] = None
     requested_storage_gb: Optional[float] = None
+    add_disk_gb: Optional[float] = None          # new disk to add (GB, thin provisioned)
     snapshot_action: Optional[str] = None  # "add" | "delete"
     snapshot_name: Optional[str] = None
     snapshot_id: Optional[str] = None
@@ -132,6 +134,7 @@ class RequestOut(BaseModel):
     snapshot_action: Optional[str] = None
     snapshot_name: Optional[str] = None
     snapshot_id: Optional[str] = None
+    add_disk_gb: Optional[float] = None
     # meta
     justification: Optional[str] = None
     admin_notes: Optional[str] = None

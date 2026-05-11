@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 
 logger = logging.getLogger(__name__)
 
@@ -23,32 +23,17 @@ def utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-AUTO_APPROVE_THRESHOLD = 0.10  # 10%
-
-
 def _is_auto_approvable(request: Request, vm: VirtualMachine) -> bool:
-    """Return True if all requested changes are ≤ 10% increase."""
+    """Auto-approve only snapshot-only changes. Any resource change requires admin approval."""
     if request.request_type != "edit":
         return False
-
-    # Snapshot-only changes are always auto-approved
     resource_change = any([
         request.requested_cpu,
         request.requested_memory_mb,
         request.requested_storage_gb,
+        request.add_disk_gb,
     ])
-    if not resource_change:
-        return True
-
-    checks = []
-    if request.requested_cpu and vm.cpu_count:
-        checks.append(request.requested_cpu <= vm.cpu_count * (1 + AUTO_APPROVE_THRESHOLD))
-    if request.requested_memory_mb and vm.memory_mb:
-        checks.append(request.requested_memory_mb <= vm.memory_mb * (1 + AUTO_APPROVE_THRESHOLD))
-    if request.requested_storage_gb and vm.storage_gb:
-        checks.append(request.requested_storage_gb <= vm.storage_gb * (1 + AUTO_APPROVE_THRESHOLD))
-
-    return all(checks) if checks else True
+    return not resource_change
 
 
 def _get_smtp(db: Session) -> Optional[SMTPService]:
@@ -87,6 +72,10 @@ async def _process_approved_request(request_id: int, db: Session):
     if not request:
         return
 
+    # Mark as processing immediately so users see live status
+    request.status = "processing"
+    db.commit()
+
     smtp = _get_smtp(db)
 
     try:
@@ -106,10 +95,26 @@ async def _process_approved_request(request_id: int, db: Session):
                     request.status = "failed"
                 else:
                     svc = VCenterService(vcenter)
+
+                    # Auto-snapshot before hardware changes (CPU/memory/new disk)
+                    has_hw_change = any([
+                        request.requested_cpu,
+                        request.requested_memory_mb,
+                        request.add_disk_gb,
+                    ])
+                    if has_hw_change:
+                        snap_name = f"pre-edit-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+                        try:
+                            svc.create_snapshot(vm.vm_id, snap_name)
+                            logger.info("Auto-snapshot '%s' created for VM %s", snap_name, vm.vm_id)
+                        except Exception as snap_err:
+                            logger.warning("Auto-snapshot failed for VM %s: %s", vm.vm_id, snap_err)
+
                     result = svc.apply_edit(
                         vm_id=vm.vm_id,
                         cpu_count=request.requested_cpu,
                         memory_mb=request.requested_memory_mb,
+                        add_disk_gb=request.add_disk_gb,
                         snapshot_action=request.snapshot_action,
                         snapshot_name=request.snapshot_name,
                         snapshot_id=request.snapshot_id,
@@ -198,6 +203,7 @@ async def create_edit_request(
         requested_cpu=body.requested_cpu,
         requested_memory_mb=body.requested_memory_mb,
         requested_storage_gb=body.requested_storage_gb,
+        add_disk_gb=body.add_disk_gb,
         snapshot_action=body.snapshot_action,
         snapshot_name=body.snapshot_name,
         snapshot_id=body.snapshot_id,

@@ -45,6 +45,7 @@ class VirtualMachine(Base):
     datastore = Column(String(256))
     network = Column(String(256))
     snapshots = Column(Text, default="[]")             # JSON list
+    disks = Column(Text, default="[]")                 # JSON list of individual disks
     last_updated = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     vcenter = relationship("VCenter", back_populates="vms")
@@ -84,6 +85,7 @@ class Request(Base):
     snapshot_action = Column(String(16))    # "add" | "delete" | None
     snapshot_name = Column(String(256))
     snapshot_id = Column(String(256))
+    add_disk_gb = Column(Float, nullable=True)         # new disk to add (GB)
 
     # ── Approval metadata ────────────────────────────────────────────────────
     justification = Column(Text)

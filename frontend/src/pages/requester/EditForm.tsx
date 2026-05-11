@@ -2,17 +2,25 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeftIcon, CheckCircleIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { ArrowLeftIcon, CheckCircleIcon, MagnifyingGlassIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 import api from '../../api/client'
 import StatusBadge from '../../components/StatusBadge'
 import LoadingSpinner from '../../components/LoadingSpinner'
 
-interface VM { id: number; name: string; cpu_count: number; memory_mb: number; storage_gb: number; power_state: string; guest_os?: string; snapshots: string }
+interface Disk { key: string; label: string; capacity_gb: number }
+interface VM {
+  id: number
+  name: string
+  cpu_count: number
+  memory_mb: number
+  storage_gb: number
+  power_state: string
+  guest_os?: string
+  snapshots: string
+  disks: string
+}
 interface FormValues {
-  requested_cpu?: number
-  requested_memory_mb?: number
-  requested_storage_gb?: number
   snapshot_action?: string
   snapshot_name?: string
   snapshot_id?: string
@@ -21,10 +29,27 @@ interface FormValues {
 
 // ── Dummy VMs for demo when no vCenters configured ───────────────────────────
 const DEMO_VMS: VM[] = [
-  { id: 1, name: 'prod-web-01', cpu_count: 4, memory_mb: 8192, storage_gb: 200, power_state: 'POWERED_ON', guest_os: 'Oracle Linux 8', snapshots: '[]' },
-  { id: 2, name: 'prod-db-01', cpu_count: 8, memory_mb: 32768, storage_gb: 500, power_state: 'POWERED_ON', guest_os: 'Oracle Linux 9', snapshots: '[{"id":"snap-1","name":"pre-patch-2024","created":"2024-12-01"}]' },
-  { id: 3, name: 'dev-app-02', cpu_count: 2, memory_mb: 4096, storage_gb: 100, power_state: 'POWERED_OFF', guest_os: 'Ubuntu 22.04', snapshots: '[]' },
-  { id: 4, name: 'staging-api-01', cpu_count: 2, memory_mb: 4096, storage_gb: 80, power_state: 'POWERED_ON', guest_os: 'RHEL 9', snapshots: '[]' },
+  {
+    id: 1, name: 'prod-web-01', cpu_count: 4, memory_mb: 8192, storage_gb: 200,
+    power_state: 'POWERED_ON', guest_os: 'Oracle Linux 8', snapshots: '[]',
+    disks: '[{"key":"2000","label":"Hard disk 1","capacity_gb":200}]',
+  },
+  {
+    id: 2, name: 'prod-db-01', cpu_count: 8, memory_mb: 32768, storage_gb: 548,
+    power_state: 'POWERED_ON', guest_os: 'Oracle Linux 9',
+    snapshots: '[{"id":"snap-1","name":"pre-patch-2024","created":"2024-12-01"}]',
+    disks: '[{"key":"2000","label":"Hard disk 1","capacity_gb":500},{"key":"2001","label":"Hard disk 2","capacity_gb":48}]',
+  },
+  {
+    id: 3, name: 'dev-app-02', cpu_count: 2, memory_mb: 4096, storage_gb: 100,
+    power_state: 'POWERED_OFF', guest_os: 'Ubuntu 22.04', snapshots: '[]',
+    disks: '[{"key":"2000","label":"Hard disk 1","capacity_gb":100}]',
+  },
+  {
+    id: 4, name: 'staging-api-01', cpu_count: 2, memory_mb: 4096, storage_gb: 80,
+    power_state: 'POWERED_ON', guest_os: 'RHEL 9', snapshots: '[]',
+    disks: '[{"key":"2000","label":"Hard disk 1","capacity_gb":80}]',
+  },
 ]
 
 export default function EditForm() {
@@ -33,6 +58,11 @@ export default function EditForm() {
   const [search, setSearch] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  // Controlled resource fields
+  const [cpuCount, setCpuCount] = useState(1)
+  const [memoryGb, setMemoryGb] = useState(1)
+  const [addDiskGb, setAddDiskGb] = useState<string>('')
 
   const { data: vms = [], isLoading } = useQuery<VM[]>({
     queryKey: ['vms'],
@@ -48,24 +78,45 @@ export default function EditForm() {
 
   const { register, handleSubmit, watch, reset } = useForm<FormValues>()
   const snapshotAction = watch('snapshot_action')
-  const snapshots: Array<{ id: string; name: string }> = selectedVM ? JSON.parse(selectedVM.snapshots || '[]') : []
+  const snapshots: Array<{ id: string; name: string }> = selectedVM
+    ? JSON.parse(selectedVM.snapshots || '[]')
+    : []
+  const disks: Disk[] = selectedVM ? JSON.parse(selectedVM.disks || '[]') : []
 
-  const filtered = vms.filter(v => v.name.toLowerCase().includes(search.toLowerCase()) || (v.guest_os || '').toLowerCase().includes(search.toLowerCase()))
+  const filtered = vms.filter(
+    v =>
+      v.name.toLowerCase().includes(search.toLowerCase()) ||
+      (v.guest_os || '').toLowerCase().includes(search.toLowerCase()),
+  )
 
   const selectVM = (vm: VM) => {
     setSelectedVM(vm)
-    reset({ requested_cpu: vm.cpu_count, requested_memory_mb: vm.memory_mb, requested_storage_gb: vm.storage_gb })
+    setCpuCount(vm.cpu_count)
+    setMemoryGb(Math.round(vm.memory_mb / 1024))
+    setAddDiskGb('')
+    reset({ snapshot_action: '', snapshot_name: '', snapshot_id: '', justification: '' })
   }
 
   const onSubmit = async (data: FormValues) => {
     if (!selectedVM) return
+
+    const cpuChanged = cpuCount !== selectedVM.cpu_count
+    const memChanged = memoryGb !== Math.round(selectedVM.memory_mb / 1024)
+    const diskAdded = addDiskGb !== '' && Number(addDiskGb) > 0
+    const snapshotChanged = !!data.snapshot_action
+
+    if (!cpuChanged && !memChanged && !diskAdded && !snapshotChanged) {
+      toast.error('No changes made — update at least one field.')
+      return
+    }
+
     setLoading(true)
     try {
       await api.post('/requests/edit', {
         target_vm_id: selectedVM.id,
-        requested_cpu: data.requested_cpu ? Number(data.requested_cpu) : undefined,
-        requested_memory_mb: data.requested_memory_mb ? Number(data.requested_memory_mb) : undefined,
-        requested_storage_gb: data.requested_storage_gb ? Number(data.requested_storage_gb) : undefined,
+        requested_cpu: cpuChanged ? cpuCount : undefined,
+        requested_memory_mb: memChanged ? memoryGb * 1024 : undefined,
+        add_disk_gb: diskAdded ? Number(addDiskGb) : undefined,
         snapshot_action: data.snapshot_action || undefined,
         snapshot_name: data.snapshot_name || undefined,
         snapshot_id: data.snapshot_id || undefined,
@@ -86,7 +137,8 @@ export default function EditForm() {
           <CheckCircleIcon className="mx-auto h-16 w-16 text-green-500 mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Request Submitted!</h2>
           <p className="text-gray-500 mb-6">
-            Your edit request has been submitted. If the change is ≤10%, it's auto-approved. Otherwise administrators will review it.
+            Your edit request has been submitted. Snapshot-only changes are auto-approved immediately.
+            Resource changes (CPU, memory, disk) require administrator review.
           </p>
           <div className="flex gap-3 justify-center">
             <button onClick={() => navigate('/my-requests')} className="btn-primary">View My Requests</button>
@@ -168,26 +220,113 @@ export default function EditForm() {
                 </div>
 
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-                  {/* Resources */}
+                  {/* CPU & Memory */}
                   <section>
                     <h2 className="section-title mb-1">Requested Resources</h2>
-                    <p className="text-xs text-gray-400 mb-4">Leave unchanged to keep current values. Changes ≤10% are auto-approved.</p>
-                    <div className="grid grid-cols-3 gap-3">
+                    <p className="text-xs text-gray-400 mb-4">
+                      Resource changes (CPU, memory, disk) require admin approval.
+                      A snapshot is automatically taken before any hardware changes.
+                    </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* vCPU counter */}
                       <div>
                         <label className="form-label">vCPU</label>
-                        <input type="number" min={1} max={128} className="form-input"
-                          {...register('requested_cpu')} />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setCpuCount(c => Math.max(1, c - 1))}
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 active:bg-gray-100 text-lg font-medium select-none"
+                          >
+                            −
+                          </button>
+                          <span className={`w-14 text-center text-lg font-semibold ${cpuCount !== selectedVM.cpu_count ? 'text-brand-600' : 'text-gray-800'}`}>
+                            {cpuCount}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setCpuCount(c => Math.min(128, c + 1))}
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 active:bg-gray-100 text-lg font-medium select-none"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-400">Current: {selectedVM.cpu_count} vCPU</p>
                       </div>
+
+                      {/* Memory in GB */}
                       <div>
-                        <label className="form-label">Memory (MB)</label>
-                        <input type="number" min={512} className="form-input"
-                          {...register('requested_memory_mb')} />
+                        <label className="form-label">Memory (GB)</label>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setMemoryGb(m => Math.max(1, m - 1))}
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 active:bg-gray-100 text-lg font-medium select-none"
+                          >
+                            −
+                          </button>
+                          <input
+                            type="number"
+                            min={1}
+                            value={memoryGb}
+                            onChange={e => setMemoryGb(Math.max(1, Number(e.target.value)))}
+                            className={`w-20 rounded-lg border border-gray-300 px-2 py-1.5 text-center text-base font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500 ${memoryGb !== Math.round(selectedVM.memory_mb / 1024) ? 'text-brand-600' : 'text-gray-800'}`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setMemoryGb(m => m + 1)}
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 active:bg-gray-100 text-lg font-medium select-none"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-400">Current: {(selectedVM.memory_mb / 1024).toFixed(0)} GB</p>
                       </div>
-                      <div>
-                        <label className="form-label">Storage (GB)</label>
-                        <input type="number" min={1} className="form-input"
-                          {...register('requested_storage_gb')} />
+                    </div>
+                  </section>
+
+                  {/* Disk list */}
+                  <section>
+                    <h2 className="section-title mb-3">Storage</h2>
+                    {disks.length > 0 ? (
+                      <div className="mb-3 rounded-lg border border-gray-200 divide-y divide-gray-100">
+                        {disks.map(disk => (
+                          <div key={disk.key} className="flex items-center justify-between px-3 py-2 text-sm">
+                            <span className="text-gray-700">{disk.label}</span>
+                            <span className="font-medium text-gray-900">{disk.capacity_gb} GB</span>
+                          </div>
+                        ))}
                       </div>
+                    ) : (
+                      <p className="text-xs text-gray-400 mb-3">No disk data available (sync from vCenter to populate).</p>
+                    )}
+
+                    {/* Add new disk */}
+                    <div className="rounded-lg border border-dashed border-gray-300 p-3">
+                      <label className="form-label flex items-center gap-1 mb-2">
+                        <PlusIcon className="h-4 w-4" /> Add New Disk (GB, thin provisioned)
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          placeholder="e.g. 100"
+                          value={addDiskGb}
+                          onChange={e => setAddDiskGb(e.target.value)}
+                          className="form-input w-32"
+                        />
+                        {addDiskGb && Number(addDiskGb) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setAddDiskGb('')}
+                            className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700"
+                          >
+                            <TrashIcon className="h-4 w-4" /> Remove
+                          </button>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Adds a new virtual disk. Note: existing snapshots are NOT automatically removed before disk operations.
+                      </p>
                     </div>
                   </section>
 

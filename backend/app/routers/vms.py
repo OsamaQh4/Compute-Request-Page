@@ -46,6 +46,7 @@ def _sync_vcenter(vcenter, db: Session):
         obj.datastore = vm_data.get("datastore", "")
         obj.network = vm_data.get("network", "")
         obj.snapshots = json.dumps(vm_data.get("snapshots", []))
+        obj.disks = json.dumps(vm_data.get("disks", []))
         obj.last_updated = utcnow()
 
     vcenter.last_sync = utcnow()

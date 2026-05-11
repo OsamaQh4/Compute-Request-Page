@@ -85,11 +85,17 @@ class VCenterService:
         memory = v.get("memory", {})
         guest = v.get("guest_OS", "")
 
-        # Aggregate storage
+        # Per-disk info and aggregated storage
         storage_gb = 0.0
-        for disk in v.get("disks", {}).values():
+        disks = []
+        for key, disk in v.get("disks", {}).items():
             cap = disk.get("capacity", 0)
             storage_gb += cap / (1024 ** 3)
+            disks.append({
+                "key": key,
+                "label": disk.get("label", f"Hard disk {key}"),
+                "capacity_gb": round(cap / (1024 ** 3), 2),
+            })
 
         # IPs
         ips = []
@@ -108,6 +114,7 @@ class VCenterService:
             "cpu_count": cpu.get("count", 0),
             "memory_mb": memory.get("size_MiB", 0),
             "storage_gb": round(storage_gb, 2),
+            "disks": disks,
             "guest_os": guest,
             "ip_addresses": ips,
             "datacenter": "",   # requires additional REST call; populated from placement
@@ -127,11 +134,29 @@ class VCenterService:
             pass
         return []
 
+    def create_snapshot(self, vm_id: str, name: str) -> bool:
+        """Create a snapshot; returns True on success."""
+        with self._client() as client:
+            token = self._get_session(client)
+            client.headers["vmware-api-session-id"] = token
+            try:
+                resp = client.post(
+                    f"{self.base_url}/rest/vcenter/vm/{vm_id}/snapshot",
+                    json={"spec": {"name": name, "memory": False, "quiesce": False}},
+                )
+                return resp.is_success
+            finally:
+                try:
+                    client.delete(f"{self.base_url}/rest/com/vmware/cis/session")
+                except Exception:
+                    pass
+
     def apply_edit(
         self,
         vm_id: str,
         cpu_count: Optional[int] = None,
         memory_mb: Optional[int] = None,
+        add_disk_gb: Optional[float] = None,
         snapshot_action: Optional[str] = None,
         snapshot_name: Optional[str] = None,
         snapshot_id: Optional[str] = None,
@@ -166,6 +191,25 @@ class VCenterService:
                         applied.append(f"Memory updated to {memory_mb} MB")
                     else:
                         errors.append(f"Memory update failed (HTTP {resp.status_code}): {resp.text}")
+
+                if add_disk_gb is not None:
+                    capacity_bytes = int(add_disk_gb * (1024 ** 3))
+                    resp = client.post(
+                        f"{self.base_url}/rest/vcenter/vm/{vm_id}/hardware/disk",
+                        json={
+                            "spec": {
+                                "type": "VMDK",
+                                "new_vmdk": {
+                                    "capacity": capacity_bytes,
+                                    "name": f"New Disk ({add_disk_gb} GB)",
+                                }
+                            }
+                        },
+                    )
+                    if resp.is_success:
+                        applied.append(f"New disk added ({add_disk_gb} GB, thin provisioned)")
+                    else:
+                        errors.append(f"Disk add failed (HTTP {resp.status_code}): {resp.text}")
 
                 if snapshot_action == "add" and snapshot_name:
                     resp = client.post(

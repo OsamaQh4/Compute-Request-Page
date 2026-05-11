@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import {
   ServerStackIcon,
@@ -6,6 +6,7 @@ import {
   Cog6ToothIcon,
   ArrowRightOnRectangleIcon,
   ComputerDesktopIcon,
+  ArrowLeftIcon,
 } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 
@@ -57,6 +58,17 @@ export default function AdminLayout() {
             </NavLink>
           ))}
         </nav>
+
+        {/* Back to Portal */}
+        <div className="px-3 pb-2">
+          <Link
+            to="/"
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-brand-200 hover:bg-brand-800 hover:text-white transition-colors"
+          >
+            <ArrowLeftIcon className="h-4 w-4" />
+            Back to Portal
+          </Link>
+        </div>
 
         {/* User */}
         <div className="border-t border-brand-800 px-4 py-4">
