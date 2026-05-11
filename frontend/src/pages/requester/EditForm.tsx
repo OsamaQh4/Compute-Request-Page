@@ -137,8 +137,9 @@ export default function EditForm() {
           <CheckCircleIcon className="mx-auto h-16 w-16 text-green-500 mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Request Submitted!</h2>
           <p className="text-gray-500 mb-6">
-            Your edit request has been submitted. Snapshot-only changes are auto-approved immediately.
-            Resource changes (CPU, memory, disk) require administrator review.
+            Your edit request has been submitted. Changes within the auto-approval thresholds
+            (≤ 4 vCPU increase, ≤ 6 GB RAM increase, ≤ 100 GB new disk) are processed immediately.
+            Larger changes are pending administrator review.
           </p>
           <div className="flex gap-3 justify-center">
             <button onClick={() => navigate('/my-requests')} className="btn-primary">View My Requests</button>
@@ -223,10 +224,10 @@ export default function EditForm() {
                   {/* CPU & Memory */}
                   <section>
                     <h2 className="section-title mb-1">Requested Resources</h2>
-                    <p className="text-xs text-gray-400 mb-4">
-                      Resource changes (CPU, memory, disk) require admin approval.
-                      A snapshot is automatically taken before any hardware changes.
-                    </p>
+                    <div className="mb-4 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-700">
+                      <strong>Auto-approval thresholds:</strong> increases of ≤ 4 vCPU, ≤ 6 GB RAM, or ≤ 100 GB new disk are auto-approved.
+                      Larger increases require admin review. A snapshot is taken automatically before any hardware change.
+                    </div>
                     <div className="grid grid-cols-2 gap-4">
                       {/* vCPU counter */}
                       <div>

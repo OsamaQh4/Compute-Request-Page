@@ -23,17 +23,40 @@ def utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+AUTO_APPROVE_MAX_CPU_INCREASE = 4        # vCPUs
+AUTO_APPROVE_MAX_MEMORY_INCREASE_GB = 6  # GB  (stored as MB internally)
+AUTO_APPROVE_MAX_DISK_GB = 100           # GB for a new disk
+
+
 def _is_auto_approvable(request: Request, vm: VirtualMachine) -> bool:
-    """Auto-approve only snapshot-only changes. Any resource change requires admin approval."""
+    """
+    Auto-approve rules:
+    - Snapshot-only changes: always auto-approve.
+    - Resource decreases: always auto-approve.
+    - Resource increases within thresholds: auto-approve.
+      CPU increase ≤ 4 vCPU, Memory increase ≤ 6 GB, New disk ≤ 100 GB.
+    - Any increase beyond thresholds: requires admin approval.
+    """
     if request.request_type != "edit":
         return False
-    resource_change = any([
-        request.requested_cpu,
-        request.requested_memory_mb,
-        request.requested_storage_gb,
-        request.add_disk_gb,
-    ])
-    return not resource_change
+
+    checks = []
+
+    if request.requested_cpu is not None and vm.cpu_count:
+        delta = request.requested_cpu - vm.cpu_count
+        if delta > AUTO_APPROVE_MAX_CPU_INCREASE:
+            checks.append(False)
+
+    if request.requested_memory_mb is not None and vm.memory_mb:
+        delta_gb = (request.requested_memory_mb - vm.memory_mb) / 1024
+        if delta_gb > AUTO_APPROVE_MAX_MEMORY_INCREASE_GB:
+            checks.append(False)
+
+    if request.add_disk_gb is not None:
+        if request.add_disk_gb > AUTO_APPROVE_MAX_DISK_GB:
+            checks.append(False)
+
+    return all(checks)
 
 
 def _get_smtp(db: Session) -> Optional[SMTPService]:
